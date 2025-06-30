@@ -1,0 +1,6 @@
+streamlit
+llama-index
+fastembed
+openai
+python-dotenv
+googlesearch-python
