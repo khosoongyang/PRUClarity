@@ -73,6 +73,8 @@ class Tools:
         if not text:
             return ""
         
+        text = text.replace("...", "")  # Remove ellipses (NEW)
+        
         # Remove common date patterns
         date_patterns = [
             r'\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b',  # MM/DD/YYYY, MM-DD-YYYY
@@ -104,13 +106,24 @@ class Tools:
             r'^\w+\s*[·•-]\s*',  # "Source •"
             r'\s*[·•-]\s*\d+\s+(hours?|days?|weeks?|months?)\s+ago.*\]'
         ]
-
         patterns = date_patterns + time_patterns + metadata_patterns
         for pattern in patterns:
             text = re.sub(pattern, '', text, flags=re.IGNORECASE)
 
-        cleaned_text = re.sub(r'\s+', ' ', text).strip()
-        return cleaned_text
+        keywords = ['policy', 'budget', 'government', 'change', 'support', 'economy', 'families', 'workers', 'jobs']
+        
+        # Split text into short sentences
+        sentences = re.split(r'(?<=[.?!])\s+', text)
+
+        # Keep only short sentences that contain keywords
+        important = []
+        for sentence in sentences:
+            if any(k in sentence.lower() for k in keywords) and len(sentence) <= 160:
+                important.append(sentence.strip())
+
+        # Return the most important points
+        return " ".join(important)
+    
 
     def get_search_tool(self):
         """Return the search tool for external use"""
