@@ -1,9 +1,22 @@
+import re
+
 from llama_index.embeddings.fastembed import FastEmbedEmbedding
 from llama_index.llms.openai import OpenAI
 from llama_index.core.settings import Settings
 from llama_index.core.tools import FunctionTool
 from googlesearch import search as google_search
 from config import Config
+
+def enforce_prefixes(llm_output):
+    date_pattern = re.compile(r"^\(\d{4}(?:-\d{2}-\d{2})?\)")
+    lines = [line.strip() for line in llm_output.split('\n') if line.strip()]
+    processed = []
+    for line in lines:
+        if date_pattern.match(line):
+            processed.append(line)
+        else:
+            processed.append(f"(Date not specified) {line}")
+    return "\n".join(processed)
 
 class Tools:
     def __init__(self):
