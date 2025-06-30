@@ -64,7 +64,7 @@ def get_custom_css():
         }
         input, textarea {
             color: black !important;
-            background-color: white !important;
+            background-color: black !important;
             font-family: 'Poppins', sans-serif !important;
         }
         .stButton > button {

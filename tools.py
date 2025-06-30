@@ -58,70 +58,92 @@ class Tools:
                 advanced=True
             )
 
-            cleaned_paragraphs = ""
+            # Fixed: Use a list to collect cleaned results
+            cleaned_results = []
             for result in results:
                 description = getattr(result, 'snippet', None) or getattr(result, 'description', None)
                 if description:
                     cleaned = self._clean_search_result(description)
                     if cleaned:
-                        cleaned_paragraphs += cleaned + "\n"
+                        cleaned_results.append(cleaned)
 
-            if not cleaned_paragraphs.strip():
+            if not cleaned_results:
                 return "No relevant summaries found."
 
-            # Use the LLM to refine and summarize the cleaned points
+            # Join with triple newlines for better separation and readability
+            cleaned_paragraphs = "\n\n\n".join(cleaned_results)
+
+            # Enhanced prompt to preserve policy dates and timing
             prompt = (
-                "Please summarize the following search result snippets into clear, factual bullet points. "
-                "Avoid ellipses, vague terms, or broken phrases. Keep each point concise, informative, and properly worded:\n\n"
+                "Please organize the following search results into clear, factual bullet points. "
+                "IMPORTANT: Preserve all policy update dates, effective dates, and timing information. "
+                "Include when policies were announced, implemented, or became effective. "
+                "Format each point clearly with dates in brackets when available. "
+                "Avoid ellipses, vague terms, or broken phrases:\n\n"
                 + cleaned_paragraphs
             )
 
             response = self.llm.complete(prompt)
-            return response
+            return str(response)  # Ensure it's a string
 
         except Exception as e:
             return f"Search failed: {str(e)}"
 
     def _clean_search_result(self, text: str) -> str:
-        """Remove date/time, source patterns, and filter irrelevant or incomplete sentences"""
+        """Extract policy dates and filter relevant sentences with proper line breaks"""
         import re
+        import os
 
         if not text:
             return ""
 
+        # Store original text for date extraction
+        original_text = text
         text = text.replace("...", "")  # Remove ellipses
 
-        date_patterns = [
-            r'\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b',
-            r'\b\d{4}[/-]\d{1,2}[/-]\d{1,2}\b',
-            r'\b\d{1,2}\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{2,4}\b',
-            r'\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{2,4}\b',
-            r'\b\d{1,2}\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{2,4}\b',
-            r'\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{2,4}\b',
-            r'\b\d{1,2}\s+(hours?|days?|weeks?|months?)\s+ago\b',
-            r'\byesterday\b',
-            r'\btoday\b',
-            r'\btomorrow\b',
-            r'\blast\s+(week|month|year)\b',
-            r'\bnext\s+(week|month|year)\b',
+        # Extract policy update dates and timing information
+        policy_dates = []
+        
+        # Comprehensive date patterns for policy updates
+        policy_date_patterns = [
+            r'(?:updated|effective|announced|implemented|launched|revised|introduced|started|beginning)\s+(?:on\s+)?(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})',
+            r'(?:updated|effective|announced|implemented|launched|revised|introduced|started|beginning)\s+(?:on\s+)?(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{2,4})',
+            r'(?:updated|effective|announced|implemented|launched|revised|introduced|started|beginning)\s+(?:on\s+)?(\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{2,4})',
+            r'(?:from|since|as of)\s+(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{2,4})',
+            r'(?:from|since|as of)\s+(\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{2,4})',
+            r'(\d{4})\s+(?:budget|policy|update|changes)',
+            r'(?:in|for)\s+(\d{4})',
         ]
 
+        # Extract dates related to policies
+        for pattern in policy_date_patterns:
+            matches = re.findall(pattern, original_text, flags=re.IGNORECASE)
+            policy_dates.extend(matches)
+
+        # Remove non-policy related metadata patterns only
+        metadata_patterns = [
+            r'^\d+\s+(hours?|days?|weeks?|months?)\s+ago\s*[·•-]\s*',
+            r'^\w+\s*[·•-]\s*(?!\s*(?:updated|effective|announced|policy))',  # Don't remove if followed by policy terms
+            r'\s*[·•-]\s*\d+\s+(hours?|days?|weeks?|months?)\s+ago.*\]',
+        ]
+
+        # Only remove time patterns, not date patterns that might be policy-related
         time_patterns = [
             r'\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|am|pm)?\b',
             r'\b\d{1,2}\s*(?:AM|PM|am|pm)\b',
         ]
 
-        metadata_patterns = [
-            r'^\d+\s+(hours?|days?|weeks?|months?)\s+ago\s*[·•-]\s*',
-            r'^\w+\s*[·•-]\s*',
-            r'\s*[·•-]\s*\d+\s+(hours?|days?|weeks?|months?)\s+ago.*\]',
-        ]
-
-        for pattern in date_patterns + time_patterns + metadata_patterns:
+        for pattern in time_patterns + metadata_patterns:
             text = re.sub(pattern, '', text, flags=re.IGNORECASE)
 
-        # Keywords to filter meaningful content
-        keywords = ['policy', 'budget', 'government', 'change', 'support', 'economy', 'families', 'workers', 'jobs', 'benefit', 'insurance', 'health', 'cost', 'coverage']
+        # Enhanced keywords to capture policy timing and updates
+        keywords = [
+            'policy', 'budget', 'government', 'change', 'support', 'economy', 
+            'families', 'workers', 'jobs', 'benefit', 'insurance', 'health', 
+            'cost', 'coverage', 'updated', 'effective', 'announced', 'implemented',
+            'launched', 'revised', 'introduced', 'started', 'beginning', 'from',
+            'since', 'as of', 'new', 'latest', 'recent', 'current'
+        ]
 
         sentences = re.split(r'(?<=[.?!])\s+', text)
         important = []
@@ -129,15 +151,39 @@ class Tools:
         for sentence in sentences:
             sentence = sentence.strip()
             if any(k in sentence.lower() for k in keywords):
-                if len(sentence) < 20:  # Too short = likely fragment
+                if len(sentence) < 15:  # Slightly lower threshold for policy dates
                     continue
-                if 'from .' in sentence or '(inclusive)' in sentence:
+                if 'from .' in sentence:
                     continue
-                if '...' in sentence:
+                # Don't skip sentences with ellipses if they contain policy information
+                if '...' in sentence and not any(policy_word in sentence.lower() for policy_word in ['policy', 'updated', 'effective', 'announced']):
                     continue
-                important.append(sentence)
+                
+                # Add date context if available
+                sentence_with_context = sentence
+                if policy_dates:
+                    # Check if this sentence already contains a date
+                    has_date = any(re.search(r'\b\d{4}\b|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)', sentence, re.IGNORECASE) for date in policy_dates)
+                    if not has_date and any(policy_word in sentence.lower() for policy_word in ['policy', 'benefit', 'coverage', 'support']):
+                        # Add the most recent policy date as context
+                        latest_date = policy_dates[-1] if policy_dates else None
+                        if latest_date:
+                            sentence_with_context = f"[{latest_date}] {sentence}"
+                
+                important.append(sentence_with_context)
 
-        return "\n".join(important)
+        # Add policy dates summary at the beginning if found
+        result_parts = []
+        if policy_dates:
+            unique_dates = list(set(policy_dates))
+            if unique_dates:
+                result_parts.append(f"Policy Update Dates: {', '.join(unique_dates)}")
+        
+        if important:
+            result_parts.extend(important)
+
+        # Use double line breaks for better readability
+        return (os.linesep + os.linesep).join(result_parts)
 
     def get_search_tool(self):
         """Return the search tool for external use"""
