@@ -30,7 +30,5 @@ class Config:
         "Example:\n"
         "(2024-04-01) Outpatient benefit changed to Cancer Drug Treatment benefit.\n"
         "(Date not specified) Rider plans now offer increased coverage options."
-        "Snippets:\n"
-        f"{cleaned_paragraphs}"
     )
     
