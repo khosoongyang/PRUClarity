@@ -39,7 +39,8 @@ venv\Scripts\activate     # Windows
 
 ### 3. Install dependencies
 ```
-3```
+pip install -r requirements.txt
+```
 
 ### 4. Create a .env file
 ```
