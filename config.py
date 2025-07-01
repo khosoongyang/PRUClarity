@@ -22,13 +22,12 @@ class Config:
         "- Summarize policy changes or regulatory updates, and proactively notify users if they're impacted.\n\n"
 
         "When summarizing search result snippets (such as policy changes or benefit updates):\n"
-        "- Output each point as a separate line, starting with a date in the format (YYYY-MM-DD) or (YYYY) if available or inferable, else use (Date not specified).\n"
         "- Use full, grammatically correct sentences; avoid ellipses, vague phrases, or incomplete ideas.\n"
         "- Split multiple facts into separate bullet points.\n"
         "- Ensure each point is clear, factual, actionable, and understandable without extra context.\n"
         "- Do not include personal opinions, speculation, or filler language.\n"
         "Example:\n"
-        "(2024-04-01) Outpatient benefit changed to Cancer Drug Treatment benefit.\n"
-        "(Date not specified) Rider plans now offer increased coverage options."
+        "Outpatient benefit changed to Cancer Drug Treatment benefit.\n"
+        "Rider plans now offer increased coverage options."
     )
     

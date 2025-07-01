@@ -18,16 +18,12 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class SearchResult:
-    """Data class for search results"""
     title: str
     url: str
     snippet: str
     description: str = ""
 
 class DateExtractor:
-    """Utility class for extracting and parsing dates from text"""
-    
-    # Comprehensive date patterns for policy updates
     POLICY_DATE_PATTERNS = [
         r'(?:updated|effective|announced|implemented|launched|revised|introduced|started|beginning)\s+(?:on\s+)?(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})',
         r'(?:updated|effective|announced|implemented|launched|revised|introduced|started|beginning)\s+(?:on\s+)?(\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{2,4})',
@@ -40,34 +36,26 @@ class DateExtractor:
     
     @classmethod
     def extract_policy_dates(cls, text: str) -> List[str]:
-        """Extract dates related to policies from text"""
         if not text:
             return []
-        
         policy_dates = []
         for pattern in cls.POLICY_DATE_PATTERNS:
             matches = re.findall(pattern, text, flags=re.IGNORECASE)
             policy_dates.extend(matches)
-        
-        return list(set(policy_dates))  # Remove duplicates
+        return list(set(policy_dates))
 
 class TextCleaner:
-    """Utility class for cleaning and processing text"""
-    
-    # Patterns for removing metadata
     METADATA_PATTERNS = [
         r'^\d+\s+(hours?|days?|weeks?|months?)\s+ago\s*[·•-]\s*',
         r'^\w+\s*[·•-]\s*(?!\s*(?:updated|effective|announced|policy))',
         r'\s*[·•-]\s*\d+\s+(hours?|days?|weeks?|months?)\s+ago.*\]',
     ]
     
-    # Time patterns to remove
     TIME_PATTERNS = [
         r'\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|am|pm)?\b',
         r'\b\d{1,2}\s*(?:AM|PM|am|pm)\b',
     ]
     
-    # Keywords for identifying important content
     POLICY_KEYWORDS = [
         'policy', 'budget', 'government', 'change', 'support', 'economy', 
         'families', 'workers', 'jobs', 'benefit', 'insurance', 'health', 
@@ -78,89 +66,51 @@ class TextCleaner:
     
     @classmethod
     def clean_text(cls, text: str) -> str:
-        """Remove unwanted patterns from text"""
         if not text:
             return ""
-        
-        # Remove ellipses and clean up
         text = text.replace("...", "")
-        
-        # Remove metadata and time patterns
         for pattern in cls.TIME_PATTERNS + cls.METADATA_PATTERNS:
             text = re.sub(pattern, '', text, flags=re.IGNORECASE)
-        
         return text.strip()
     
     @classmethod
     def extract_important_sentences(cls, text: str, policy_dates: List[str]) -> List[str]:
-        """Extract sentences containing policy-related keywords"""
         sentences = re.split(r'(?<=[.?!])\s+', text)
         important = []
-        
         for sentence in sentences:
             sentence = sentence.strip()
-            
-            # Skip short or malformed sentences
             if len(sentence) < 15 or 'from .' in sentence:
                 continue
-            
-            # Skip sentences with ellipses unless they contain policy information
             if ('...' in sentence and 
                 not any(word in sentence.lower() for word in ['policy', 'updated', 'effective', 'announced'])):
                 continue
-            
-            # Check if sentence contains policy keywords
             if any(keyword in sentence.lower() for keyword in cls.POLICY_KEYWORDS):
-                # Add date context if available and sentence doesn't already have a date
                 sentence_with_context = cls._add_date_context(sentence, policy_dates)
                 important.append(sentence_with_context)
-        
         return important
     
     @classmethod
     def _add_date_context(cls, sentence: str, policy_dates: List[str]) -> str:
-        """Add date context to sentence if it doesn't already contain a date"""
         if not policy_dates:
             return sentence
-        
-        # Check if sentence already contains a date
         has_date = bool(re.search(r'\b\d{4}\b|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)', 
                                  sentence, re.IGNORECASE))
-        
-        # Add date context for policy-related sentences without dates
         if (not has_date and 
             any(word in sentence.lower() for word in ['policy', 'benefit', 'coverage', 'support'])):
             latest_date = policy_dates[-1]
             return f"[{latest_date}] {sentence}"
-        
         return sentence
 
-def enforce_prefixes(llm_output: str) -> str:
-    """Ensure all lines have date prefixes"""
-    date_pattern = re.compile(r"^\(\d{4}(?:-\d{2}-\d{2})?\)")
-    lines = [line.strip() for line in llm_output.split('\n') if line.strip()]
-    processed = []
-    
-    for line in lines:
-        if date_pattern.match(line):
-            processed.append(line)
-        else:
-            processed.append(f"(Date not specified) {line}")
-    
-    return "\n".join(processed)
-
 class Tools:
-    """Main tools class for web search and LLM integration"""
-    
     def __init__(self):
         self.config = Config()
         self.date_extractor = DateExtractor()
         self.text_cleaner = TextCleaner()
         self._setup_llm()
         self._setup_tools()
-    
+        self._setup_rag(pdf_dir=getattr(self.config, "PDF_DIR", "docs"))
+
     def _setup_llm(self) -> None:
-        """Initialize LLM and embedding models"""
         try:
             self.llm = OpenAI(
                 model=self.config.MODEL_NAME,
@@ -176,133 +126,127 @@ class Tools:
         except Exception as e:
             logger.error(f"Failed to initialize LLM: {e}")
             raise
-    
+
     def _setup_tools(self) -> None:
-        """Initialize AI tools"""
         self.search_tool = FunctionTool.from_defaults(
-            fn=self.search,
-            name="web_search",
-            description="Search the web for current information and news"
+            fn=self.query_with_rag_then_search,
+            name="hybrid_search",
+            description="Answer questions using PDF knowledge base first, then fallback to web search"
         )
         logger.info("Search tool initialized successfully")
 
+    def _setup_rag(self, pdf_dir: str) -> None:
+        try:
+            from llama_index.core import SimpleDirectoryReader, VectorStoreIndex, ServiceContext
+            from llama_index.core.query_engine import RetrieverQueryEngine
+
+            documents = SimpleDirectoryReader(pdf_dir).load_data()
+            service_context = ServiceContext.from_defaults(
+                llm=self.llm,
+                embed_model=self.embed_model
+            )
+            self.index = VectorStoreIndex.from_documents(documents, service_context=service_context)
+            self.rag_engine = self.index.as_query_engine(similarity_top_k=3)
+            logger.info("RAG engine initialized from directory: %s", pdf_dir)
+        except Exception as e:
+            logger.error(f"Failed to initialize RAG engine: {e}")
+            self.rag_engine = None
+
+    def query_with_rag_then_search(self, query: str) -> str:
+        """Use RAG engine first, fallback to web search if needed"""
+        if not query.strip():
+            return "Please enter a valid query."
+
+    def query_with_rag_then_search(self, query: str) -> str:
+        """Use RAG engine first, fallback to web search if needed"""
+
+        if not query.strip():
+            return "Please enter a valid query."
+
+        # --- Prompt enhancement for medical/insurance queries ---
+        medical_keywords = ["stroke", "heart attack", "emergency", "hospital", "claimable", "prushield", "copayment"]
+        if any(kw in query.lower() for kw in medical_keywords):
+            query += (
+                " Based on Singapore MOH and Prudential PRUShield policies, "
+                "please specify which hospital panel the patient should go to for stroke treatment, "
+                "whether it is claimable by PRUShield, and provide estimated co-payment amounts "
+                "according to the latest regulations."
+            )
+
+        # Step 1: Try RAG
+        if self.rag_engine:
+            try:
+                rag_response = self.rag_engine.query(query)
+                if rag_response and len(str(rag_response).strip()) > 50:
+                    return f"📄 Answer from PDF knowledge base:\n\n{str(rag_response).strip()}"
+            except Exception as e:
+                logger.warning(f"RAG query failed: {e}")
+
+        # Step 2: Fallback to Search
+        return f"🌐 Fallback to web search:\n\n{self.search(query)}"
+
     def search(self, query: str) -> str:
-        """
-        Search Google for information related to the query.
-        Returns clean, structured summaries using LLM refinement.
-        
-        Args:
-            query: Search query string
-            
-        Returns:
-            Formatted search results or error message
-        """
-        if not query or not query.strip():
-            return "Empty query provided."
-        
         try:
             logger.info(f"Searching for: {query}")
-            
-            # Perform Google search
             results = google_search(
                 query,
                 num_results=getattr(self.config, 'MAX_SEARCH_RESULTS', 10),
                 lang=getattr(self.config, 'SEARCH_LANGUAGE', 'en'),
                 advanced=True
             )
-
-            # Process search results
             cleaned_results = self._process_search_results(results)
-            
             if not cleaned_results:
                 return "No relevant summaries found."
-
-            # Generate LLM summary
             return self._generate_llm_summary(cleaned_results)
-
         except Exception as e:
-            error_msg = f"Search failed: {str(e)}"
-            logger.error(error_msg)
-            return error_msg
+            logger.error(f"Search failed: {str(e)}")
+            return f"Search failed: {str(e)}"
 
     def _process_search_results(self, results) -> List[str]:
-        """Process raw search results and extract relevant information"""
         cleaned_results = []
-        
         for result in results:
             try:
-                # Extract description from result object
                 description = (getattr(result, 'snippet', None) or 
-                             getattr(result, 'description', None))
-                
+                               getattr(result, 'description', None))
                 if description:
                     cleaned = self._clean_search_result(description)
                     if cleaned:
                         cleaned_results.append(cleaned)
             except Exception as e:
                 logger.warning(f"Error processing search result: {e}")
-                continue
-        
         return cleaned_results
 
     def _clean_search_result(self, text: str) -> str:
-        """Extract policy dates and filter relevant sentences with proper formatting"""
         if not text:
             return ""
-
-        # Extract policy dates
         policy_dates = self.date_extractor.extract_policy_dates(text)
-        
-        # Clean the text
         cleaned_text = self.text_cleaner.clean_text(text)
-        
-        # Extract important sentences
         important_sentences = self.text_cleaner.extract_important_sentences(
             cleaned_text, policy_dates
         )
-
-        # Build result
         result_parts = []
-        
-        # Add policy dates summary if found
         if policy_dates:
-            unique_dates = list(set(policy_dates))
-            result_parts.append(f"Policy Update Dates: {', '.join(unique_dates)}")
-        
-        # Add important sentences
+            result_parts.append(f"Policy Update Dates: {', '.join(policy_dates)}")
         if important_sentences:
             result_parts.extend(important_sentences)
-        
-        # Join with double line breaks for better readability
         return (os.linesep + os.linesep).join(result_parts)
 
     def _generate_llm_summary(self, cleaned_results: List[str]) -> str:
-        """Generate LLM summary from cleaned search results"""
-        # Join results with clear separation
-        cleaned_paragraphs = "\n\n\n".join(cleaned_results)
-
-        # Enhanced prompt for better summarization
         prompt = (
-            "Please organize the following search results into clear, factual bullet points. "
-            "IMPORTANT: Preserve all policy update dates, effective dates, and timing information. "
-            "Include when policies were announced, implemented, or became effective. "
-            "Format each point clearly with dates in brackets when available. "
-            "Avoid ellipses, vague terms, or broken phrases. "
-            "Group related information together and maintain chronological order when possible:\n\n"
-            + cleaned_paragraphs
+            "Organize the following search results into clear, factual bullet points. "
+            "Preserve all policy update dates and timing information. "
+            "Group related info and keep it chronological:\n\n"
+            + "\n\n\n".join(cleaned_results)
         )
-
         try:
             response = self.llm.complete(prompt)
             return str(response)
         except Exception as e:
             logger.error(f"LLM summarization failed: {e}")
-            return f"Summarization failed, returning raw results:\n\n{cleaned_paragraphs}"
+            return f"Summarization failed. Raw results:\n\n{cleaned_results}"
 
     def get_search_tool(self) -> FunctionTool:
-        """Return the search tool for external use"""
         return self.search_tool
 
     def get_config(self) -> Config:
-        """Return the configuration object"""
         return self.config
