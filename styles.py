@@ -40,10 +40,10 @@ def get_custom_css():
             margin-top: 0.5rem;
             font-family: 'Poppins', sans-serif !important;
         }
-
+        
         input[type="text"], textarea {
-            background-color: white !important;
-            color: black !important;
+            background-color: #ffffff !important;
+            color: #111827 !important;
             border: 2px solid #e5e7eb;
             border-radius: 10px;
             padding: 0.75rem 1rem;
@@ -51,22 +51,22 @@ def get_custom_css():
             transition: all 0.3s ease;
             box-shadow: 0 2px 6px rgba(0,0,0,0.05);
             font-family: 'Poppins', sans-serif !important;
+            caret-color: #dc2626; /* Ensures caret is visible and red */
         }
+
         input[type="text"]:focus, textarea:focus {
             border-color: #dc2626;
             box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.15);
             outline: none;
         }
-        input::placeholder {
+
+        input::placeholder,
+        textarea::placeholder {
             color: #9ca3af !important;
             opacity: 1;
             font-family: 'Poppins', sans-serif !important;
         }
-        input, textarea {
-            color: black !important;
-            background-color: black !important;
-            font-family: 'Poppins', sans-serif !important;
-        }
+
         .stButton > button {
             background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
             color: white;
