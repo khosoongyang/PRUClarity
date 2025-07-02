@@ -56,12 +56,17 @@ class TextCleaner:
         r'\b\d{1,2}\s*(?:AM|PM|am|pm)\b',
     ]
     
+    # Enhanced keywords for better medical/insurance content extraction
     POLICY_KEYWORDS = [
         'policy', 'budget', 'government', 'change', 'support', 'economy', 
         'families', 'workers', 'jobs', 'benefit', 'insurance', 'health', 
         'cost', 'coverage', 'updated', 'effective', 'announced', 'implemented',
         'launched', 'revised', 'introduced', 'started', 'beginning', 'from',
-        'since', 'as of', 'new', 'latest', 'recent', 'current'
+        'since', 'as of', 'new', 'latest', 'recent', 'current',
+        # Medical/Hospital keywords
+        'hospital', 'medical', 'treatment', 'stroke', 'emergency', 'panel',
+        'prushield', 'pruextra', 'mount elizabeth', 'gleneagles', 'raffles',
+        'claimable', 'copayment', 'cashless', 'admission', 'specialist'
     ]
     
     @classmethod
@@ -116,8 +121,8 @@ class Tools:
                 model=self.config.MODEL_NAME,
                 api_key=self.config.OPENAI_API_KEY,
                 system_prompt=getattr(self.config, 'system_prompt', ''),
-                temperature=0.2,
-                max_tokens=512,
+                temperature=0.1,  # Lower temperature for more consistent formatting
+                max_tokens=1024,  # Increased for longer structured responses
             )
             self.embed_model = FastEmbedEmbedding()
             Settings.llm = self.llm
@@ -157,33 +162,26 @@ class Tools:
         if not query.strip():
             return "Please enter a valid query."
 
-    def query_with_rag_then_search(self, query: str) -> str:
-        """Use RAG engine first, fallback to web search if needed"""
-
-        if not query.strip():
-            return "Please enter a valid query."
-
-        # --- Prompt enhancement for medical/insurance queries ---
-        medical_keywords = ["stroke", "heart attack", "emergency", "hospital", "claimable", "prushield", "copayment"]
+        # Enhanced prompt engineering for medical/insurance queries
+        medical_keywords = ["stroke", "heart attack", "emergency", "hospital", "claimable", "prushield", "copayment", "panel", "treatment"]
+        
+        # Detect query type and enhance accordingly
         if any(kw in query.lower() for kw in medical_keywords):
-            query += (
-                " Based on Singapore MOH and Prudential PRUShield policies, "
-                "please specify which hospital panel the patient should go to for stroke treatment, "
-                "whether it is claimable by PRUShield, and provide estimated co-payment amounts "
-                "according to the latest regulations."
-            )
+            enhanced_query = f"{query} Singapore PRUShield panel hospitals Mount Elizabeth Gleneagles Mount Alvernia coverage network"
+        else:
+            enhanced_query = query
 
-        # Step 1: Try RAG
+        # Step 1: Try RAG first
         if self.rag_engine:
             try:
-                rag_response = self.rag_engine.query(query)
+                rag_response = self.rag_engine.query(enhanced_query)
                 if rag_response and len(str(rag_response).strip()) > 50:
-                    return f"📄 Answer from PDF knowledge base:\n\n{str(rag_response).strip()}"
+                    return f"📄 **Answer from PDF knowledge base:**\n\n{str(rag_response).strip()}"
             except Exception as e:
                 logger.warning(f"RAG query failed: {e}")
 
-        # Step 2: Fallback to Search
-        return f"🌐 Fallback to web search:\n\n{self.search(query)}"
+        # Step 2: Enhanced web search with structured output
+        return self.search(enhanced_query)
 
     def search(self, query: str) -> str:
         try:
@@ -196,25 +194,55 @@ class Tools:
             )
             cleaned_results = self._process_search_results(results)
             if not cleaned_results:
-                return "No relevant summaries found."
-            return self._generate_llm_summary(cleaned_results)
+                return "No relevant information found."
+            return self._generate_structured_response(cleaned_results, query)
         except Exception as e:
             logger.error(f"Search failed: {str(e)}")
             return f"Search failed: {str(e)}"
 
-    def _process_search_results(self, results) -> List[str]:
+    def _process_search_results(self, results) -> List[Dict[str, str]]:
+        """Enhanced result processing with metadata preservation"""
         cleaned_results = []
         for result in results:
             try:
+                title = getattr(result, 'title', '')
+                url = getattr(result, 'url', '')
                 description = (getattr(result, 'snippet', None) or 
-                               getattr(result, 'description', None))
+                               getattr(result, 'description', None) or '')
+                
                 if description:
-                    cleaned = self._clean_search_result(description)
-                    if cleaned:
-                        cleaned_results.append(cleaned)
+                    cleaned_content = self._clean_search_result(description)
+                    if cleaned_content:
+                        cleaned_results.append({
+                            'title': title,
+                            'url': url,
+                            'content': cleaned_content,
+                            'source': self._extract_source_name(title, url)
+                        })
             except Exception as e:
                 logger.warning(f"Error processing search result: {e}")
         return cleaned_results
+
+    def _extract_source_name(self, title: str, url: str) -> str:
+        """Extract clean source name from title or URL"""
+        if 'gleneagles' in title.lower() or 'gleneagles' in url.lower():
+            return 'Gleneagles Hospital'
+        elif 'mount elizabeth' in title.lower() or 'mountelizabeth' in url.lower():
+            return 'Mount Elizabeth Hospital'
+        elif 'raffles' in title.lower() or 'raffles' in url.lower():
+            return 'Raffles Medical'
+        elif 'prudential' in title.lower() or 'prudential' in url.lower():
+            return 'Prudential Singapore'
+        elif 'moh' in title.lower() or 'moh' in url.lower():
+            return 'Ministry of Health'
+        else:
+            # Extract domain name as fallback
+            try:
+                from urllib.parse import urlparse
+                domain = urlparse(url).netloc
+                return domain.replace('www.', '').title()
+            except:
+                return 'Healthcare Provider'
 
     def _clean_search_result(self, text: str) -> str:
         if not text:
@@ -231,19 +259,67 @@ class Tools:
             result_parts.extend(important_sentences)
         return (os.linesep + os.linesep).join(result_parts)
 
-    def _generate_llm_summary(self, cleaned_results: List[str]) -> str:
-        prompt = (
-            "Organize the following search results into clear, factual bullet points. "
-            "Preserve all policy update dates and timing information. "
-            "Group related info and keep it chronological:\n\n"
-            + "\n\n\n".join(cleaned_results)
-        )
+    def _generate_structured_response(self, cleaned_results: List[Dict[str, str]], original_query: str) -> str:
+        """Generate structured response using enhanced prompting"""
+        
+        # Prepare structured content for LLM
+        formatted_content = []
+        for i, result in enumerate(cleaned_results):
+            source_info = f"Source: {result['source']}"
+            content_block = f"**{result['title']}**\n{source_info}\n{result['content']}\n"
+            formatted_content.append(content_block)
+        
+        # Enhanced prompt for structured output
+        prompt = f"""
+Based on the user query: "{original_query}"
+
+Organize the following search results into a comprehensive, structured response following these requirements:
+
+1. Start with an appropriate emoji header (🏥 for medical, 💊 for medication, 📋 for policy)
+2. Use markdown formatting with **bold headers**
+3. Structure the response with clear sections:
+   - Hospital Panel Options (if medical query - MUST mention hospitals within Prudential's panel network)
+   - Coverage Benefits 
+   - Important Considerations
+   - Next Steps (always include contact info: 1800 333 0333)
+
+4. Include specific details like:
+   - Hospital names that are within Prudential's panel (Mount Elizabeth, Gleneagles, Mount Alvernia, etc.)
+   - Clearly distinguish between panel vs non-panel hospitals
+   - Coverage percentages for panel hospitals
+   - Prudential product names (PRUShield, PRUExtra, PRUPanel Connect)
+   - Actionable advice
+
+5. CRITICAL: Always mention which hospitals are within Prudential's panel network and their coverage benefits
+6. Maintain professional, confident tone positioning Prudential as the preferred choice
+
+Search Results:
+{chr(10).join(formatted_content)}
+
+Generate a response that directly addresses the user's query with the structured format above.
+"""
+
         try:
             response = self.llm.complete(prompt)
             return str(response)
         except Exception as e:
-            logger.error(f"LLM summarization failed: {e}")
-            return f"Summarization failed. Raw results:\n\n{cleaned_results}"
+            logger.error(f"LLM structured response failed: {e}")
+            # Fallback to basic formatting
+            return self._create_fallback_response(cleaned_results, original_query)
+
+    def _create_fallback_response(self, cleaned_results: List[Dict[str, str]], query: str) -> str:
+        """Fallback response if LLM fails"""
+        response = "## **🏥 Search Results**\n\n"
+        
+        for result in cleaned_results[:5]:  # Limit to top 5 results
+            response += f"### **{result['title']}**\n"
+            response += f"*Source: {result['source']}*\n\n"
+            response += f"{result['content']}\n\n"
+        
+        response += "### **Next Steps**\n"
+        response += "Contact Prudential Customer Service at **1800 333 0333** for personalized assistance.\n"
+        
+        return response
 
     def get_search_tool(self) -> FunctionTool:
         return self.search_tool
