@@ -13,7 +13,7 @@ def render_footer():
     """Render the footer"""
     st.markdown("""
     <div style="margin-top: 3rem; padding: 2rem; text-align: center; color: #000000; font-family: 'Inter', sans-serif;">
-        <p>Your Life. Your Plan. Your Clarity. • Built by Team High 5</p>
+        <p>Your Life. Your Plan. Your Clarity.</p>
     </div>
     """, unsafe_allow_html=True)
 
