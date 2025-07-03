@@ -129,9 +129,8 @@ def render_header_with_logo():
     st.markdown(
         """
         <div class="main-header">
-            <h1>PRUClarity</h1>
+            <h1>PRUHelper</h1>
             <div class="subtitle">Your AI-Powered Financial Assistant</div>
-            <img class="prudential-logo" src="https://upload.wikimedia.org/wikipedia/commons/4/4b/Prudential_plc_logo.svg" alt="Prudential Logo"/>
         </div>
         """,
         unsafe_allow_html=True
@@ -139,7 +138,7 @@ def render_header_with_logo():
 
 def main():
     st.set_page_config(
-        page_title="PRUClarity", 
+        page_title="PRUHelper", 
         page_icon="🤖",
         layout="wide"
     )
@@ -155,8 +154,8 @@ def main():
     render_header_with_logo()
 
     if st.session_state["nav_page"] == "Home":
-        st.markdown('<label class="input-label">Ask about financial policies or market news:</label>', unsafe_allow_html=True)
-        query = st.text_input("", placeholder="What are the new policy changes?", label_visibility="collapsed")
+        st.markdown('<label class="input-label">Enter your scenario:</label>', unsafe_allow_html=True)
+        query = st.text_input("", placeholder="I fell down... what should I do?", label_visibility="collapsed")
         if query:
             with st.spinner("🔍 Searching for the latest information..."):
                 search_result = search_tool.call(query).content
@@ -164,8 +163,8 @@ def main():
     elif st.session_state["nav_page"] == "About Us":
         st.markdown(
             """
-            ## About PRUClarity
-            PRUClarity is your AI-powered assistant for up-to-date financial policy and market news.  
+            ## About PRUHelper
+            PRUCHelper is your AI-powered assistant for up-to-date financial policy and market news.  
             - **Mission:** Make complex financial information accessible and clear.
             - **Features:** Instant search, policy explanation, and market news summaries.
             - **Contact:** [info@pruclarity.com](mailto:info@pruclarity.com)
